@@ -10,6 +10,9 @@ import logging
 from fastapi import APIRouter, Header, HTTPException
 
 from app.config import settings
+from app.integrations.sheets import get_store
+from app.services.daily_summary import build_summary, render_html
+from app.services.reminder import run_reminders as run_reminders_service
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -23,13 +26,16 @@ def _check_cron_auth(authorization: str | None) -> None:
 @router.post("/run-reminders")
 async def run_reminders(authorization: str | None = Header(default=None)) -> dict:
     _check_cron_auth(authorization)
-    # Real implementation lands in the crons phase
-    log.info("run-reminders triggered (stub)")
-    return {"status": "ok", "sent": 0, "stub": True}
+    result = run_reminders_service(get_store())
+    log.info("run-reminders sent=%d at_risk=%d", result["sent"], result["flagged_at_risk"])
+    return {"status": "ok", **result}
 
 
 @router.post("/run-daily-summary")
 async def run_daily_summary(authorization: str | None = Header(default=None)) -> dict:
     _check_cron_auth(authorization)
-    log.info("run-daily-summary triggered (stub)")
-    return {"status": "ok", "summary_sent": False, "stub": True}
+    summary = build_summary(get_store())
+    html = render_html(summary)
+    # Sending via Gmail is wired up in the deploy phase. For now we just return it.
+    log.info("run-daily-summary built (yday_collected=%s)", summary["yesterday_collected"])
+    return {"status": "ok", "summary": summary, "html_preview_len": len(html)}
