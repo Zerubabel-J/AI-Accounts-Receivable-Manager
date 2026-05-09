@@ -106,20 +106,40 @@ def smart_match(
 
     # ---- Step 1: exact email match ----
     email_matches = [i for i in open_invoices if i.email.strip().lower() == payer_email]
-    if len(email_matches) == 1:
-        inv = email_matches[0]
-        guard = _reconcile_guard(payment, inv, prelim_method="exact_email")
-        if guard:
-            return guard
-        return MatchResult(
-            invoice_id=inv.invoice_id,
-            confidence=1.0,
-            status="confirmed",
-            reasoning=f"Exact email match ({inv.email}) and amount within tolerance.",
-            method="exact_email",
-        )
-    elif len(email_matches) > 1:
-        # Multiple invoices for same email -> fall through to fuzzy with these as candidates
+    if email_matches:
+        # Disambiguate by amount when there are multiple invoices for the same email.
+        amount_perfect = [
+            i for i in email_matches if amounts_match(payment.amount, i.amount, EXACT_AMOUNT_TOLERANCE)
+        ]
+        if len(amount_perfect) == 1:
+            inv = amount_perfect[0]
+            guard = _reconcile_guard(payment, inv, prelim_method="exact_email")
+            if guard:
+                return guard
+            return MatchResult(
+                invoice_id=inv.invoice_id,
+                confidence=1.0,
+                status="confirmed",
+                reasoning=(
+                    f"Exact email match ({inv.email}) and amount {payment.amount:.2f} "
+                    f"matches invoice {inv.invoice_id}."
+                ),
+                method="exact_email",
+            )
+        if len(email_matches) == 1:
+            # Single email match but amount off - reconciliation guard will downgrade
+            inv = email_matches[0]
+            guard = _reconcile_guard(payment, inv, prelim_method="exact_email")
+            if guard:
+                return guard
+            return MatchResult(
+                invoice_id=inv.invoice_id,
+                confidence=1.0,
+                status="confirmed",
+                reasoning=f"Exact email match ({inv.email}) and amount within tolerance.",
+                method="exact_email",
+            )
+        # Many email matches and amount didn't disambiguate -> fall through to fuzzy
         return _fuzzy_step(payment, email_matches, judge)
 
     # ---- Step 2: exact normalized business name ----
@@ -128,22 +148,43 @@ def smart_match(
         business_matches = [
             i for i in open_invoices if normalize_business(i.business_name) == payer_business_norm
         ]
-        if len(business_matches) == 1:
-            inv = business_matches[0]
-            guard = _reconcile_guard(payment, inv, prelim_method="exact_business")
-            if guard:
-                return guard
-            return MatchResult(
-                invoice_id=inv.invoice_id,
-                confidence=0.95,
-                status="confirmed",
-                reasoning=(
-                    f"Business name '{payment.payer_name}' matches '{inv.business_name}' "
-                    f"after normalization; amount within tolerance."
-                ),
-                method="exact_business",
-            )
-        elif len(business_matches) > 1:
+        if business_matches:
+            amount_perfect = [
+                i
+                for i in business_matches
+                if amounts_match(payment.amount, i.amount, EXACT_AMOUNT_TOLERANCE)
+            ]
+            if len(amount_perfect) == 1:
+                inv = amount_perfect[0]
+                guard = _reconcile_guard(payment, inv, prelim_method="exact_business")
+                if guard:
+                    return guard
+                return MatchResult(
+                    invoice_id=inv.invoice_id,
+                    confidence=0.95,
+                    status="confirmed",
+                    reasoning=(
+                        f"Business name '{payment.payer_name}' matches '{inv.business_name}' "
+                        f"after normalization; amount {payment.amount:.2f} matches {inv.invoice_id}."
+                    ),
+                    method="exact_business",
+                )
+            if len(business_matches) == 1:
+                inv = business_matches[0]
+                guard = _reconcile_guard(payment, inv, prelim_method="exact_business")
+                if guard:
+                    return guard
+                return MatchResult(
+                    invoice_id=inv.invoice_id,
+                    confidence=0.95,
+                    status="confirmed",
+                    reasoning=(
+                        f"Business name '{payment.payer_name}' matches '{inv.business_name}' "
+                        f"after normalization; amount within tolerance."
+                    ),
+                    method="exact_business",
+                )
+            # Many business matches and amount didn't disambiguate -> fall through to fuzzy
             return _fuzzy_step(payment, business_matches, judge)
 
     # ---- Step 3: fuzzy AI judgment over amount-similar invoices ----
