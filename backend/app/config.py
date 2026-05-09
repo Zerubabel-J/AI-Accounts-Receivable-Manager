@@ -20,6 +20,7 @@ class Settings(BaseSettings):
 
     # Behavior
     send_emails_for_real: bool = False
+    seed_on_startup: bool = True  # set False in production with a real Sheet
     user_email: str = "you@example.com"
     app_base_url: str = "http://localhost:3000"
 

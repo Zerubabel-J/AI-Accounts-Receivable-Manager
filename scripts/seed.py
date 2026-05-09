@@ -9,6 +9,9 @@ with some clean matches, some fuzzy matches, and some unmatched payments
 for the Review Queue demo.
 
 Designed to make the dashboard look like a real company at ~$340K outstanding.
+
+Also re-exported as `seed_demo_data()` so the running app can self-seed at
+startup when the store is empty (see backend/app/main.py).
 """
 
 import random
@@ -16,7 +19,7 @@ import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-# Make /backend importable when running from /scripts
+# Make /backend importable when running from /scripts (no-op when imported from inside backend)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
 
 from app.integrations.sheets import get_store  # noqa: E402
@@ -27,8 +30,6 @@ from app.models.payment import (  # noqa: E402
     Payment,
     PaymentSource,
 )
-
-random.seed(42)  # reproducible
 
 CLIENTS = [
     ("Sarah Chen", "Acme Corp", "sarah@acmecorp.com", "555-0101"),
@@ -51,7 +52,9 @@ CLIENTS = [
 INVOICE_AMOUNTS = [1250, 2400, 4800, 7500, 950, 3200, 6100, 1800, 5400, 9200, 12500, 3750]
 
 
-def main() -> None:
+def seed_demo_data(verbose: bool = True) -> dict:
+    """Populate the active store with realistic demo data. Returns a summary dict."""
+    random.seed(42)  # deterministic
     store = get_store()
     today = date.today()
 
@@ -200,27 +203,34 @@ def main() -> None:
         store.upsert_payment(pay)
         pay_counter += 1
 
-    # Print summary
     all_invoices = store.list_invoices()
     by_status: dict[str, int] = {}
     by_status_amt: dict[str, float] = {}
     for inv in all_invoices:
         by_status[inv.status.value] = by_status.get(inv.status.value, 0) + 1
         by_status_amt[inv.status.value] = by_status_amt.get(inv.status.value, 0.0) + inv.amount
-
-    print(f"Seeded {len(all_invoices)} invoices and {pay_counter - 1} payments.")
-    print()
-    print(f"{'Status':<12} {'Count':>6} {'Amount':>14}")
-    for status, count in sorted(by_status.items()):
-        amt = by_status_amt[status]
-        print(f"{status:<12} {count:>6} {'$' + f'{amt:,.0f}':>14}")
     outstanding = sum(
         i.amount
         for i in all_invoices
         if i.status in (InvoiceStatus.SENT, InvoiceStatus.OVERDUE, InvoiceStatus.AT_RISK)
     )
-    print(f"\nOutstanding total: ${outstanding:,.2f}")
+
+    if verbose:
+        print(f"Seeded {len(all_invoices)} invoices and {pay_counter - 1} payments.")
+        print()
+        print(f"{'Status':<12} {'Count':>6} {'Amount':>14}")
+        for status, count in sorted(by_status.items()):
+            amt = by_status_amt[status]
+            print(f"{status:<12} {count:>6} {'$' + f'{amt:,.0f}':>14}")
+        print(f"\nOutstanding total: ${outstanding:,.2f}")
+
+    return {
+        "invoices": len(all_invoices),
+        "payments": pay_counter - 1,
+        "outstanding": outstanding,
+        "by_status": by_status,
+    }
 
 
 if __name__ == "__main__":
-    main()
+    seed_demo_data()
