@@ -22,9 +22,14 @@ log = logging.getLogger(__name__)
 
 MODEL_NAME = "gemini-2.5-flash"
 
-PROMPT_TEMPLATE = """You are an Accounts Receivable matching assistant. Decide whether an incoming \
-payment matches one of the candidate invoices. Be conservative - it is better to flag for human \
-review than to confirm a wrong match.
+SYSTEM_INSTRUCTION = (
+    "You are an Accounts Receivable matching assistant. "
+    "You ONLY respond with a single valid JSON object. "
+    "Never include prose, explanations, or markdown code fences. "
+    "Be conservative - it is better to flag for human review than to confirm a wrong match."
+)
+
+PROMPT_TEMPLATE = """Match the incoming payment to a candidate invoice.
 
 INCOMING PAYMENT:
 - payer_name:  "{payer_name}"
@@ -35,24 +40,18 @@ CANDIDATE INVOICES (up to 5):
 {candidates_block}
 
 Score on these signals (in order of weight):
-1. Same business (consider entity suffixes like LLC/Inc/Corp as equivalent)
+1. Same business (entity suffixes LLC/Inc/Corp are equivalent)
 2. Email domain or local-part overlap
 3. Amount equality (already pre-filtered to within +/-10%)
 4. Customer name similarity
 
-Return JSON only, no prose, no markdown fences:
-{{
-  "invoice_id": "<id of best candidate or null>",
-  "confidence": <float 0.0-1.0>,
-  "reasoning": "<one sentence explanation, max 25 words>"
-}}
-
-Confidence guidance:
+Confidence rubric:
 - >= 0.85 - clearly the same payer/invoice
 - 0.60-0.85 - probably right but worth a human glance
-- < 0.60 - inconclusive, prefer null
+- < 0.60 - inconclusive, set invoice_id to null
 
-JSON:"""
+Respond with EXACTLY this JSON shape and nothing else:
+{{"invoice_id": "INV-XXXX or null", "confidence": 0.0-1.0, "reasoning": "one sentence, max 25 words"}}"""
 
 
 def _format_candidates(invoices: list[Invoice]) -> str:
@@ -89,7 +88,10 @@ class GeminiFuzzyJudge:
         if not key:
             raise ValueError("GEMINI_API_KEY is not set")
         genai.configure(api_key=key)
-        self._model = genai.GenerativeModel(model_name)
+        self._model = genai.GenerativeModel(
+            model_name,
+            system_instruction=SYSTEM_INSTRUCTION,
+        )
 
     def judge(self, payment: Payment, candidates: list[Invoice]) -> tuple[str | None, float, str]:
         if not candidates:
@@ -108,7 +110,16 @@ class GeminiFuzzyJudge:
                 generation_config={
                     "temperature": 0.1,
                     "response_mime_type": "application/json",
-                    "max_output_tokens": 200,
+                    "response_schema": {
+                        "type": "object",
+                        "properties": {
+                            "invoice_id": {"type": "string", "nullable": True},
+                            "confidence": {"type": "number"},
+                            "reasoning": {"type": "string"},
+                        },
+                        "required": ["invoice_id", "confidence", "reasoning"],
+                    },
+                    "max_output_tokens": 2048,
                 },
             )
             text = response.text or ""
