@@ -7,6 +7,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from app.integrations.gemini import get_judge
 from app.integrations.sheets import get_store
 from app.models.invoice import InvoiceStatus
 from app.models.payment import MatchStatus, Payment, PaymentSource
@@ -29,7 +30,7 @@ def get_payment(payment_id: str) -> Payment:
 
 
 class SimulateRequest(BaseModel):
-    scenario: Literal["clean_match", "fuzzy_match", "no_match"] = "clean_match"
+    scenario: Literal["clean_match", "fuzzy_match", "tricky_match", "no_match"] = "clean_match"
 
 
 @router.post("/simulate")
@@ -84,6 +85,16 @@ def simulate_payment(req: SimulateRequest) -> dict:
             amount=target.amount,
             received_at=datetime.now(),
         )
+    elif req.scenario == "tricky_match":
+        # Garbled name + alias email - this is where Gemini has to reason
+        payment = Payment(
+            payment_id=payment_id,
+            source=PaymentSource.STRIPE,
+            payer_name=target.business_name.split()[0] if target.business_name else target.customer_name.split()[0],
+            payer_email=f"accounting+{target.business_name.lower().replace(' ', '')[:6]}@gmail.com",
+            amount=target.amount,
+            received_at=datetime.now(),
+        )
     else:  # no_match
         payment = Payment(
             payment_id=payment_id,
@@ -94,7 +105,7 @@ def simulate_payment(req: SimulateRequest) -> dict:
             received_at=datetime.now(),
         )
 
-    result = smart_match(payment, open_invoices, judge=None)
+    result = smart_match(payment, open_invoices, judge=get_judge())
 
     payment.matched_invoice_id = result.invoice_id
     payment.match_confidence = result.confidence

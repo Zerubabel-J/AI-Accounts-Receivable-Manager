@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { api } from "@/lib/api";
 
-type Scenario = "clean_match" | "fuzzy_match" | "no_match";
+type Scenario = "clean_match" | "fuzzy_match" | "tricky_match" | "no_match";
 
 interface SimulateResult {
   payment_id: string;
@@ -20,6 +20,7 @@ interface SimulateResult {
 const SCENARIO_LABEL: Record<Scenario, string> = {
   clean_match: "Clean match",
   fuzzy_match: "Fuzzy match",
+  tricky_match: "Tricky (AI judges)",
   no_match: "Unknown payer",
 };
 

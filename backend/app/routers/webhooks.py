@@ -19,6 +19,7 @@ import stripe
 from fastapi import APIRouter, Header, HTTPException, Request
 
 from app.config import settings
+from app.integrations.gemini import get_judge
 from app.integrations.sheets import get_store
 from app.models.invoice import InvoiceStatus
 from app.models.payment import MatchStatus, Payment, PaymentSource
@@ -70,8 +71,7 @@ async def stripe_webhook(
         if i.status in (InvoiceStatus.SENT, InvoiceStatus.OVERDUE, InvoiceStatus.AT_RISK)
     ]
 
-    # The judge is wired in once Gemini integration lands - falls back to needs_review for now
-    result = smart_match(payment, open_invoices, judge=None)
+    result = smart_match(payment, open_invoices, judge=get_judge())
 
     payment.matched_invoice_id = result.invoice_id
     payment.match_confidence = result.confidence
