@@ -107,7 +107,6 @@ def seed_demo_data(verbose: bool = True) -> dict:
                 reminder_count=min(3, max(0, days_past_due // 7)) if status != InvoiceStatus.SENT else 0,
                 paid_at=paid_at,
             )
-            store.upsert_invoice(inv)
             invoices.append(inv)
             inv_counter += 1
 
@@ -128,13 +127,16 @@ def seed_demo_data(verbose: bool = True) -> dict:
                 if inv.status != InvoiceStatus.PAID:
                     inv.risk_score = risk
                     inv.risk_reason = reason
-                    store.upsert_invoice(inv)
+
+    # Bulk write all invoices in one operation (was 75 sequential calls before)
+    store.upsert_invoices(invoices)
 
     # Generate ~20 payments. Mix:
     #   - 12 cleanly matched to paid invoices (already done)
     #   - 4 needing review (fuzzy match cases)
     #   - 4 no-match
     pay_counter = 1
+    payments_to_write: list[Payment] = []
 
     paid_invoices = [i for i in invoices if i.status == InvoiceStatus.PAID]
     for inv in paid_invoices[:12]:
@@ -154,7 +156,7 @@ def seed_demo_data(verbose: bool = True) -> dict:
             match_status=MatchStatus.CONFIRMED,
             reviewed_by_user=False,
         )
-        store.upsert_payment(pay)
+        payments_to_write.append(pay)
         pay_counter += 1
 
     # 4 fuzzy / needs-review payments tied to currently-unpaid invoices
@@ -178,7 +180,7 @@ def seed_demo_data(verbose: bool = True) -> dict:
             match_status=MatchStatus.NEEDS_REVIEW,
             reviewed_by_user=False,
         )
-        store.upsert_payment(pay)
+        payments_to_write.append(pay)
         pay_counter += 1
 
     # 4 no-match payments (unknown payers)
@@ -200,8 +202,11 @@ def seed_demo_data(verbose: bool = True) -> dict:
             match_reasoning="No invoice matches this payer email, business, or amount.",
             match_status=MatchStatus.NO_MATCH,
         )
-        store.upsert_payment(pay)
+        payments_to_write.append(pay)
         pay_counter += 1
+
+    # Bulk write all payments in one operation
+    store.upsert_payments(payments_to_write)
 
     all_invoices = store.list_invoices()
     by_status: dict[str, int] = {}

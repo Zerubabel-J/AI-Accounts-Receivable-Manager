@@ -2,13 +2,13 @@
 
 Two implementations, same Protocol:
     - InMemoryStore:     for local dev, tests, and the seed.py script
-    - GoogleSheetsStore: real backend talking to Google Sheets via OAuth user creds
+    - GoogleSheetsStore: real backend talking to Google Sheets
 
-The choice is driven by env: if GOOGLE_SHEETS_ID is empty, we use InMemoryStore.
-This lets the app run without credentials while still exercising the same code paths.
+Backend choice is driven by env: if GOOGLE_SHEETS_ID is empty -> InMemoryStore.
 
-Auth model: OAuth user credentials. First run opens a browser for consent and
-caches a token to GOOGLE_TOKEN_PATH. After that the app uses the cached token.
+Auth: the credentials file is auto-detected.
+    - service_account JSON  -> direct service-account auth (no browser)
+    - OAuth client JSON     -> InstalledAppFlow with token cached to GOOGLE_TOKEN_PATH
 """
 
 from __future__ import annotations
@@ -32,10 +32,12 @@ class Store(Protocol):
     def list_invoices(self, status: InvoiceStatus | None = None) -> list[Invoice]: ...
     def get_invoice(self, invoice_id: str) -> Invoice | None: ...
     def upsert_invoice(self, invoice: Invoice) -> Invoice: ...
+    def upsert_invoices(self, invoices: list[Invoice]) -> None: ...  # bulk variant
 
     def list_payments(self) -> list[Payment]: ...
     def get_payment(self, payment_id: str) -> Payment | None: ...
     def upsert_payment(self, payment: Payment) -> Payment: ...
+    def upsert_payments(self, payments: list[Payment]) -> None: ...  # bulk variant
 
     def log_activity(
         self, invoice_id: str, action: str, actor: str, details: str = ""
@@ -66,6 +68,10 @@ class InMemoryStore:
         self._invoices[invoice.invoice_id] = invoice
         return invoice
 
+    def upsert_invoices(self, invoices: list[Invoice]) -> None:
+        for inv in invoices:
+            self._invoices[inv.invoice_id] = inv
+
     def list_payments(self) -> list[Payment]:
         return sorted(self._payments.values(), key=lambda p: p.received_at, reverse=True)
 
@@ -75,6 +81,10 @@ class InMemoryStore:
     def upsert_payment(self, payment: Payment) -> Payment:
         self._payments[payment.payment_id] = payment
         return payment
+
+    def upsert_payments(self, payments: list[Payment]) -> None:
+        for p in payments:
+            self._payments[p.payment_id] = p
 
     def log_activity(self, invoice_id: str, action: str, actor: str, details: str = "") -> None:
         self._activity.append(
@@ -139,12 +149,38 @@ SHEETS_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 # ---------- Google Sheets implementation ----------
 
 
-def _get_oauth_creds(credentials_path: str, token_path: str) -> Any:
-    """Load OAuth user creds, refreshing or running the browser flow as needed."""
+def _detect_creds_kind(credentials_path: str) -> str:
+    """Returns 'service_account' or 'oauth_client' by peeking at the JSON."""
+    import json
+
+    with open(credentials_path) as f:
+        data = json.load(f)
+    if data.get("type") == "service_account":
+        return "service_account"
+    if "installed" in data or "web" in data:
+        return "oauth_client"
+    raise ValueError(
+        f"Unrecognized credentials file at {credentials_path}. "
+        "Expected a service_account JSON or an OAuth client JSON."
+    )
+
+
+def _get_creds(credentials_path: str, token_path: str) -> Any:
+    """Auto-detect creds kind and return a usable Credentials object."""
+    kind = _detect_creds_kind(credentials_path)
+
+    if kind == "service_account":
+        from google.oauth2.service_account import Credentials as SA_Credentials
+
+        log.info("Using service-account auth for Google Sheets")
+        return SA_Credentials.from_service_account_file(credentials_path, scopes=SHEETS_SCOPES)
+
+    # OAuth user-credential flow with cached token
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
     from google_auth_oauthlib.flow import InstalledAppFlow
 
+    log.info("Using OAuth user-credential auth for Google Sheets")
     creds = None
     token_file = Path(token_path)
     if token_file.exists():
@@ -172,10 +208,14 @@ class GoogleSheetsStore:
         from googleapiclient.discovery import build
 
         self.sheet_id = sheet_id
-        creds = _get_oauth_creds(credentials_path, token_path)
+        creds = _get_creds(credentials_path, token_path)
         self._service = build("sheets", "v4", credentials=creds, cache_discovery=False)
         self._values = self._service.spreadsheets().values()
         self._ensure_tabs()
+
+        # In-memory cache. Loaded once on startup; mutations write through.
+        self._inv_cache: dict[str, Invoice] | None = None
+        self._pay_cache: dict[str, Payment] | None = None
 
     # ----- internal helpers -----
 
@@ -239,81 +279,99 @@ class GoogleSheetsStore:
             body={"values": [row]},
         ).execute()
 
+    # ----- Cache helpers -----
+
+    def _load_invoice_cache(self) -> dict[str, Invoice]:
+        if self._inv_cache is None:
+            rows = self._read_rows(INVOICES_TAB)
+            self._inv_cache = {
+                r["invoice_id"]: _row_to_invoice(r) for r in rows if r.get("invoice_id")
+            }
+        return self._inv_cache
+
+    def _load_payment_cache(self) -> dict[str, Payment]:
+        if self._pay_cache is None:
+            rows = self._read_rows(PAYMENTS_TAB)
+            self._pay_cache = {
+                r["payment_id"]: _row_to_payment(r) for r in rows if r.get("payment_id")
+            }
+        return self._pay_cache
+
+    def _flush_invoices(self) -> None:
+        cache = self._load_invoice_cache()
+        records = [_invoice_to_row(i) for i in cache.values()]
+        self._write_all(INVOICES_TAB, INVOICE_HEADERS, records)
+
+    def _flush_payments(self) -> None:
+        cache = self._load_payment_cache()
+        records = [_payment_to_row(p) for p in cache.values()]
+        self._write_all(PAYMENTS_TAB, PAYMENT_HEADERS, records)
+
     # ----- Invoice ops -----
 
     def list_invoices(self, status: InvoiceStatus | None = None) -> list[Invoice]:
-        rows = self._read_rows(INVOICES_TAB)
-        invoices = [_row_to_invoice(r) for r in rows if r.get("invoice_id")]
+        invoices = list(self._load_invoice_cache().values())
         if status:
             invoices = [i for i in invoices if i.status == status]
         return sorted(invoices, key=lambda i: i.due_date)
 
     def get_invoice(self, invoice_id: str) -> Invoice | None:
-        for inv in self.list_invoices():
-            if inv.invoice_id == invoice_id:
-                return inv
-        return None
+        return self._load_invoice_cache().get(invoice_id)
 
     def upsert_invoice(self, invoice: Invoice) -> Invoice:
-        rows = self._read_rows(INVOICES_TAB)
-        records = [r for r in rows if r.get("invoice_id")]
-        existing_idx = next(
-            (i for i, r in enumerate(records) if r.get("invoice_id") == invoice.invoice_id),
-            None,
-        )
-        as_dict = _invoice_to_row(invoice)
-        if existing_idx is None:
-            records.append(as_dict)
-        else:
-            records[existing_idx] = as_dict
-        self._write_all(INVOICES_TAB, INVOICE_HEADERS, records)
+        cache = self._load_invoice_cache()
+        cache[invoice.invoice_id] = invoice
+        self._flush_invoices()
         return invoice
+
+    def upsert_invoices(self, invoices: list[Invoice]) -> None:
+        cache = self._load_invoice_cache()
+        for inv in invoices:
+            cache[inv.invoice_id] = inv
+        self._flush_invoices()
 
     # ----- Payment ops -----
 
     def list_payments(self) -> list[Payment]:
-        rows = self._read_rows(PAYMENTS_TAB)
         return sorted(
-            [_row_to_payment(r) for r in rows if r.get("payment_id")],
+            self._load_payment_cache().values(),
             key=lambda p: p.received_at,
             reverse=True,
         )
 
     def get_payment(self, payment_id: str) -> Payment | None:
-        for p in self.list_payments():
-            if p.payment_id == payment_id:
-                return p
-        return None
+        return self._load_payment_cache().get(payment_id)
 
     def upsert_payment(self, payment: Payment) -> Payment:
-        rows = self._read_rows(PAYMENTS_TAB)
-        records = [r for r in rows if r.get("payment_id")]
-        existing_idx = next(
-            (i for i, r in enumerate(records) if r.get("payment_id") == payment.payment_id),
-            None,
-        )
-        as_dict = _payment_to_row(payment)
-        if existing_idx is None:
-            records.append(as_dict)
-        else:
-            records[existing_idx] = as_dict
-        self._write_all(PAYMENTS_TAB, PAYMENT_HEADERS, records)
+        cache = self._load_payment_cache()
+        cache[payment.payment_id] = payment
+        self._flush_payments()
         return payment
 
-    # ----- Activity -----
+    def upsert_payments(self, payments: list[Payment]) -> None:
+        cache = self._load_payment_cache()
+        for p in payments:
+            cache[p.payment_id] = p
+        self._flush_payments()
+
+    # ----- Activity (fire-and-forget; uses append which is a single API call) -----
 
     def log_activity(self, invoice_id: str, action: str, actor: str, details: str = "") -> None:
-        self._append_row(
-            ACTIVITY_TAB,
-            ACTIVITY_HEADERS,
-            {
-                "timestamp": datetime.now().isoformat(),
-                "invoice_id": invoice_id,
-                "action": action,
-                "actor": actor,
-                "details": details,
-            },
-        )
+        try:
+            self._append_row(
+                ACTIVITY_TAB,
+                ACTIVITY_HEADERS,
+                {
+                    "timestamp": datetime.now().isoformat(),
+                    "invoice_id": invoice_id,
+                    "action": action,
+                    "actor": actor,
+                    "details": details,
+                },
+            )
+        except Exception as e:
+            # Activity log is best-effort; never block a user action on it
+            log.warning("Activity log write failed: %s", e)
 
 
 # ---------- Serializers ----------

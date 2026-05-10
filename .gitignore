@@ -167,6 +167,7 @@ backend/.env
 backend/credentials.json
 backend/token.json
 backend/service-account.json
+backend/service-account-key.json
 
 # IDE
 .idea/
