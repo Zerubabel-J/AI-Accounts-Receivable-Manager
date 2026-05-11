@@ -163,3 +163,90 @@ def get_judge() -> GeminiFuzzyJudge | None:
             log.warning("Could not initialize Gemini judge: %s", e)
             return None
     return _judge_singleton
+
+
+# ============================================================
+# Natural-language invoice extraction
+# ============================================================
+
+INVOICE_EXTRACTION_SYSTEM = (
+    "You extract structured invoice data from a user's natural-language request. "
+    "Respond with a single JSON object matching the exact schema. "
+    "If a field is genuinely missing, return null for that field - do not guess."
+)
+
+INVOICE_EXTRACTION_PROMPT = """Extract invoice fields from this request:
+
+REQUEST: "{text}"
+
+CONTEXT:
+- Today is {today}.
+- Default net terms are 30 days unless the request specifies otherwise.
+- If the request says "in N days" or "in N weeks", compute the due date from today.
+- If the request gives no client email, return null for email - never invent one.
+
+Respond with JSON only:
+{{
+  "customer_name": "<person's name if explicit, else null>",
+  "business_name": "<company/business name>",
+  "email": "<email if explicit, else null>",
+  "amount": <number in dollars, no currency symbol>,
+  "description": "<brief project/work description>",
+  "due_date": "<ISO date YYYY-MM-DD>"
+}}"""
+
+
+class GeminiInvoiceExtractor:
+    """Parses a free-form sentence into a structured Invoice draft."""
+
+    def __init__(self, api_key: str | None = None, model_name: str = MODEL_NAME):
+        import google.generativeai as genai
+
+        key = api_key or settings.gemini_api_key
+        if not key:
+            raise ValueError("GEMINI_API_KEY is not set")
+        genai.configure(api_key=key)
+        self._model = genai.GenerativeModel(
+            model_name,
+            system_instruction=INVOICE_EXTRACTION_SYSTEM,
+        )
+
+    def extract(self, text: str, today_iso: str) -> dict:
+        prompt = INVOICE_EXTRACTION_PROMPT.format(text=text, today=today_iso)
+        response = self._model.generate_content(
+            prompt,
+            generation_config={
+                "temperature": 0.1,
+                "response_mime_type": "application/json",
+                "response_schema": {
+                    "type": "object",
+                    "properties": {
+                        "customer_name": {"type": "string", "nullable": True},
+                        "business_name": {"type": "string"},
+                        "email": {"type": "string", "nullable": True},
+                        "amount": {"type": "number"},
+                        "description": {"type": "string"},
+                        "due_date": {"type": "string"},
+                    },
+                    "required": ["business_name", "amount", "description", "due_date"],
+                },
+                "max_output_tokens": 2048,
+            },
+        )
+        text_out = response.text or ""
+        return _parse_json_loose(text_out)
+
+
+_extractor_singleton: GeminiInvoiceExtractor | None = None
+
+
+def get_extractor() -> GeminiInvoiceExtractor | None:
+    global _extractor_singleton
+    if _extractor_singleton is None and settings.gemini_api_key:
+        try:
+            _extractor_singleton = GeminiInvoiceExtractor()
+            log.info("Gemini invoice extractor initialized")
+        except Exception as e:
+            log.warning("Could not initialize Gemini extractor: %s", e)
+            return None
+    return _extractor_singleton

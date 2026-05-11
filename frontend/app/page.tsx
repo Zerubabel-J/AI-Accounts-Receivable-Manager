@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { ConfidenceBar } from "@/components/ConfidenceBar";
+import { CreateInvoiceFromNL } from "@/components/CreateInvoiceFromNL";
 import { SimulatePayment } from "@/components/SimulatePayment";
 import { StatCard } from "@/components/StatCard";
 import { MatchStatusBadge } from "@/components/StatusBadge";
@@ -77,6 +78,8 @@ export default async function DashboardPage() {
           tone={dsoDelta > 0 ? "warn" : "good"}
         />
       </section>
+
+      <CreateInvoiceFromNL />
 
       <SimulatePayment />
 
