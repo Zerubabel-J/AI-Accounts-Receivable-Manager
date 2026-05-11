@@ -28,13 +28,10 @@ export function PayInvoiceButton({ invoiceId, enabled }: Props) {
     setBusy(true);
     setError(null);
     try {
-      const { ok, data } = await apiRaw<SimulateResult>("/payments/simulate", {
-        method: "POST",
-        body: JSON.stringify({
-          scenario: "pay_specific",
-          invoice_id: invoiceId,
-        }),
-      });
+      const { ok, data } = await apiRaw<SimulateResult>(
+        `/invoices/${invoiceId}/pay`,
+        { method: "POST" },
+      );
       if (ok) {
         setResult(data);
         router.refresh();

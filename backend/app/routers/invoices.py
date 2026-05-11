@@ -1,13 +1,15 @@
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from app.integrations.gemini import get_extractor
+from app.integrations.gemini import get_extractor, get_judge
 from app.integrations.sheets import get_store
 from app.models.invoice import Invoice, InvoiceCreate, InvoiceStatus, InvoiceUpdate
+from app.models.payment import MatchStatus, Payment, PaymentSource
+from app.services.smart_match import smart_match
 
 log = logging.getLogger(__name__)
 
@@ -46,6 +48,78 @@ def create_invoice(data: InvoiceCreate) -> Invoice:
     store.upsert_invoice(inv)
     store.log_activity(inv.invoice_id, "created", actor="user")
     return inv
+
+
+class PaySimulationResult(BaseModel):
+    payment_id: str
+    invoice_id: str
+    match_status: str
+    confidence: float
+    reasoning: str
+    method: str
+
+
+@router.post("/{invoice_id}/pay", response_model=PaySimulationResult)
+def simulate_pay_invoice(invoice_id: str) -> PaySimulationResult:
+    """Simulate the client paying this specific invoice.
+
+    Fires a fake Stripe-style payment that mirrors the invoice's email + amount,
+    runs it through Smart Match, and updates the invoice status if confirmed.
+    Used by the demo UI and the FastAPI /docs page.
+    """
+    store = get_store()
+    invoice = store.get_invoice(invoice_id)
+    if invoice is None:
+        raise HTTPException(404, f"Invoice {invoice_id} not found")
+    if invoice.status not in (InvoiceStatus.SENT, InvoiceStatus.OVERDUE):
+        raise HTTPException(
+            400, f"Invoice {invoice_id} is {invoice.status.value}, not open for payment"
+        )
+
+    payment = Payment(
+        payment_id=f"PAY-SIM-{int(datetime.now().timestamp())}",
+        source=PaymentSource.STRIPE,
+        payer_name=invoice.customer_name,
+        payer_email=invoice.email,
+        amount=invoice.amount,
+        received_at=datetime.now(),
+    )
+
+    open_invoices = [
+        i
+        for i in store.list_invoices()
+        if i.status in (InvoiceStatus.SENT, InvoiceStatus.OVERDUE, InvoiceStatus.AT_RISK)
+    ]
+    result = smart_match(payment, open_invoices, judge=get_judge())
+
+    payment.matched_invoice_id = result.invoice_id
+    payment.match_confidence = result.confidence
+    payment.match_reasoning = result.reasoning
+    payment.match_status = MatchStatus(result.status)
+    store.upsert_payment(payment)
+
+    if result.status == "confirmed" and result.invoice_id:
+        target = store.get_invoice(result.invoice_id)
+        if target is not None:
+            target.status = InvoiceStatus.PAID
+            target.paid_at = datetime.now()
+            target.matched_payment_id = payment.payment_id
+            store.upsert_invoice(target)
+            store.log_activity(
+                target.invoice_id,
+                "auto_matched_via_pay_endpoint",
+                actor="agent",
+                details=f"Payment {payment.payment_id} via {result.method}",
+            )
+
+    return PaySimulationResult(
+        payment_id=payment.payment_id,
+        invoice_id=result.invoice_id or invoice_id,
+        match_status=result.status,
+        confidence=result.confidence,
+        reasoning=result.reasoning,
+        method=result.method,
+    )
 
 
 @router.patch("/{invoice_id}", response_model=Invoice)

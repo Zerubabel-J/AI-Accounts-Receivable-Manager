@@ -117,13 +117,10 @@ export function CreateInvoiceFromNL() {
     if (!last) return;
     setPaying(true);
     try {
-      const { ok, data } = await apiRaw<SimulateResult>("/payments/simulate", {
-        method: "POST",
-        body: JSON.stringify({
-          scenario: "pay_specific",
-          invoice_id: last.invoice.invoice_id,
-        }),
-      });
+      const { ok, data } = await apiRaw<SimulateResult>(
+        `/invoices/${last.invoice.invoice_id}/pay`,
+        { method: "POST" },
+      );
       if (ok) {
         setPaid(data);
         router.refresh();
