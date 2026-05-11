@@ -28,6 +28,15 @@ interface NLResponse {
   reasoning: string;
 }
 
+interface SimulateResult {
+  payment_id: string;
+  match_status: string;
+  confidence: number;
+  reasoning: string;
+  method: string;
+  invoice_id: string | null;
+}
+
 interface NeedsMore {
   needs: string;
   extracted: Extracted;
@@ -51,6 +60,10 @@ export function CreateInvoiceFromNL() {
   const [followUp, setFollowUp] = useState<NeedsMore | null>(null);
   const [email, setEmail] = useState("");
 
+  // Pay-specific demo flow
+  const [paying, setPaying] = useState(false);
+  const [paid, setPaid] = useState<SimulateResult | null>(null);
+
   async function submit(emailOverride?: string) {
     if (!text.trim()) return;
     setBusy(true);
@@ -70,6 +83,7 @@ export function CreateInvoiceFromNL() {
         setFollowUp(null);
         setEmail("");
         setText("");
+        setPaid(null);
         router.refresh();
         return;
       }
@@ -97,6 +111,33 @@ export function CreateInvoiceFromNL() {
     setFollowUp(null);
     setEmail("");
     setText("");
+  }
+
+  async function payThisInvoice() {
+    if (!last) return;
+    setPaying(true);
+    try {
+      const { ok, data } = await apiRaw<SimulateResult>("/payments/simulate", {
+        method: "POST",
+        body: JSON.stringify({
+          scenario: "pay_specific",
+          invoice_id: last.invoice.invoice_id,
+        }),
+      });
+      if (ok) {
+        setPaid(data);
+        router.refresh();
+      } else {
+        setError(
+          (data as unknown as { detail?: string }).detail ||
+            "Pay failed - the invoice may already be paid",
+        );
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPaying(false);
+    }
   }
 
   return (
@@ -216,6 +257,34 @@ export function CreateInvoiceFromNL() {
             <ExtractedField label="Due" value={last.extracted.due_date} />
             <ExtractedField label="Description" value={last.extracted.description} />
           </div>
+
+          {/* Pay-this-invoice action: closes the demo loop */}
+          {!paid ? (
+            <div className="mt-3 flex items-center justify-between gap-3 rounded-md bg-slate-50 px-3 py-2">
+              <span className="text-xs text-slate-600">
+                Simulate the client paying this invoice (fires a Stripe-style event into Smart Match)
+              </span>
+              <button
+                onClick={payThisInvoice}
+                disabled={paying}
+                className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {paying ? "Matching..." : `Pay ${last.invoice.invoice_id}`}
+              </button>
+            </div>
+          ) : (
+            <div className="mt-3 rounded-md bg-emerald-50 p-3 ring-1 ring-emerald-200">
+              <div className="flex items-center gap-2 text-sm">
+                <span className="font-medium text-emerald-900">
+                  Paid - matched by Smart Match
+                </span>
+                <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">
+                  {Math.round(paid.confidence * 100)}% via {paid.method}
+                </span>
+              </div>
+              <div className="mt-1 text-xs text-emerald-800">{paid.reasoning}</div>
+            </div>
+          )}
         </div>
       )}
     </div>

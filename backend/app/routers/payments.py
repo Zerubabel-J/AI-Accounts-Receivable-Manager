@@ -30,7 +30,10 @@ def get_payment(payment_id: str) -> Payment:
 
 
 class SimulateRequest(BaseModel):
-    scenario: Literal["clean_match", "fuzzy_match", "tricky_match", "no_match"] = "clean_match"
+    scenario: Literal[
+        "clean_match", "fuzzy_match", "tricky_match", "no_match", "pay_specific"
+    ] = "clean_match"
+    invoice_id: str | None = None  # required when scenario == "pay_specific"
 
 
 @router.post("/simulate")
@@ -47,10 +50,20 @@ def simulate_payment(req: SimulateRequest) -> dict:
 
     payment_id = f"PAY-SIM-{int(datetime.now().timestamp())}"
 
-    # Pick a target that produces a clean demo. For fuzzy_match we want a
-    # business+amount combo that's unique among open invoices, so the engine
-    # can confirm via exact_business without amount collisions.
-    if req.scenario == "fuzzy_match":
+    # Target selection differs per scenario.
+    if req.scenario == "pay_specific":
+        if not req.invoice_id:
+            raise HTTPException(400, "invoice_id is required for scenario=pay_specific")
+        target = store.get_invoice(req.invoice_id)
+        if target is None:
+            raise HTTPException(404, f"Invoice {req.invoice_id} not found")
+        if target.status not in (InvoiceStatus.SENT, InvoiceStatus.OVERDUE):
+            raise HTTPException(
+                400, f"Invoice {req.invoice_id} is {target.status.value}, not open"
+            )
+    elif req.scenario == "fuzzy_match":
+        # Pick a business+amount combo that's unique so the engine can confirm
+        # via exact_business without amount collisions.
         from collections import Counter
 
         biz_amount_counts = Counter(
@@ -65,7 +78,7 @@ def simulate_payment(req: SimulateRequest) -> dict:
     else:
         target = random.choice(open_invoices)
 
-    if req.scenario == "clean_match":
+    if req.scenario in ("clean_match", "pay_specific"):
         # Same email, same amount -> exact_email confirmed
         payment = Payment(
             payment_id=payment_id,
