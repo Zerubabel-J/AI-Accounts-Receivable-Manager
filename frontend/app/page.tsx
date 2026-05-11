@@ -2,7 +2,6 @@ import Link from "next/link";
 
 import { ConfidenceBar } from "@/components/ConfidenceBar";
 import { CreateInvoiceFromNL } from "@/components/CreateInvoiceFromNL";
-import { SimulatePayment } from "@/components/SimulatePayment";
 import { StatCard } from "@/components/StatCard";
 import { MatchStatusBadge } from "@/components/StatusBadge";
 import { api } from "@/lib/api";
@@ -80,8 +79,6 @@ export default async function DashboardPage() {
       </section>
 
       <CreateInvoiceFromNL />
-
-      <SimulatePayment />
 
       <section className="rounded-lg border bg-gradient-to-r from-emerald-50 to-white p-5">
         <div className="flex items-center justify-between">

@@ -1,3 +1,4 @@
+import { PayInvoiceButton } from "@/components/PayInvoiceButton";
 import { InvoiceStatusBadge } from "@/components/StatusBadge";
 import { api } from "@/lib/api";
 import { fmtDate, fmtMoney } from "@/lib/format";
@@ -43,6 +44,7 @@ export default async function InvoicesPage() {
               <th className="px-4 py-3 text-right font-medium">Amount</th>
               <th className="px-4 py-3 font-medium">Due</th>
               <th className="px-4 py-3 text-right font-medium">Risk</th>
+              <th className="px-4 py-3 text-right font-medium">Action</th>
             </tr>
           </thead>
           <tbody className="divide-y">
@@ -69,6 +71,12 @@ export default async function InvoicesPage() {
                   ) : (
                     <span className="text-xs text-slate-400">—</span>
                   )}
+                </td>
+                <td className="px-4 py-3 text-right">
+                  <PayInvoiceButton
+                    invoiceId={inv.invoice_id}
+                    enabled={inv.status === "sent" || inv.status === "overdue"}
+                  />
                 </td>
               </tr>
             ))}
