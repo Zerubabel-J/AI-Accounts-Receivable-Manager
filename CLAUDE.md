@@ -1,6 +1,6 @@
 # Project: AI Accounts Receivable Manager
 
-> **Brain3 Level-1 Assignment** - 1-day project. Approved scope by Kidus (kidus@brain3.ai). His instruction: "Lgtm. The more valuable you can make it, the better."
+> **Brain3 Level-1 Assignment** - 1-day project. Approved scope by Kidus (kidus@brain3.ai). 
 
 ## What this project is
 
@@ -103,7 +103,7 @@ Smart Match cascade:
 
 ## The "more valuable" angle
 
-Kidus said "the more valuable, the better." Two specific value moves we are building:
+The more valuable, the better. Two specific value moves we are building:
 
 1. **Recovered Revenue counter** on the dashboard - "$12,840 recovered this month by AI follow-ups." Turns the tool into an ROI story.
 2. **AI explanations everywhere** - every flag, match, and risk score has a one-click "why?" expansion showing Gemini's reasoning. Makes the agent feel transparent, not magical.

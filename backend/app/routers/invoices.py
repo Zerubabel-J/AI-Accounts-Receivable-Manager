@@ -50,22 +50,48 @@ def create_invoice(data: InvoiceCreate) -> Invoice:
     return inv
 
 
+class StripePaymentPayload(BaseModel):
+    """Fields that a real Stripe webhook would deliver.
+
+    All optional - omit any to auto-fill from the target invoice (clean-match demo).
+    Provide a mismatched email or amount to stress Smart Match and Gemini.
+    """
+
+    payer_name: str | None = None
+    payer_email: str | None = None
+    amount: float | None = None
+
+
 class PaySimulationResult(BaseModel):
     payment_id: str
-    invoice_id: str
+    invoice_id: str | None
     match_status: str
     confidence: float
     reasoning: str
     method: str
+    # Echo what the simulated Stripe payload contained, so the response is self-describing.
+    payer_name: str
+    payer_email: str
+    amount: float
 
 
 @router.post("/{invoice_id}/pay", response_model=PaySimulationResult)
-def simulate_pay_invoice(invoice_id: str) -> PaySimulationResult:
-    """Simulate the client paying this specific invoice.
+def simulate_pay_invoice(
+    invoice_id: str,
+    payload: StripePaymentPayload | None = None,
+) -> PaySimulationResult:
+    """Simulate a Stripe-style payment for this invoice.
 
-    Fires a fake Stripe-style payment that mirrors the invoice's email + amount,
-    runs it through Smart Match, and updates the invoice status if confirmed.
-    Used by the demo UI and the FastAPI /docs page.
+    The body mirrors what Stripe actually sends in `charge.succeeded`:
+    `payer_name`, `payer_email`, `amount`. Any field omitted is auto-filled
+    from the target invoice (clean match for green-path demos).
+
+    Workflow:
+      1. Build a Payment from the body (or invoice defaults).
+      2. Run Smart Match against all open invoices - the engine doesn't know
+         which invoice this payment "should" pay, it has to figure it out.
+      3. If Smart Match confirms, the matched invoice (which may or may not be
+         the one in the URL) flips to paid.
     """
     store = get_store()
     invoice = store.get_invoice(invoice_id)
@@ -76,12 +102,17 @@ def simulate_pay_invoice(invoice_id: str) -> PaySimulationResult:
             400, f"Invoice {invoice_id} is {invoice.status.value}, not open for payment"
         )
 
+    body = payload or StripePaymentPayload()
+    payer_name = body.payer_name or invoice.customer_name
+    payer_email = body.payer_email or invoice.email
+    amount = body.amount if body.amount is not None else invoice.amount
+
     payment = Payment(
         payment_id=f"PAY-SIM-{int(datetime.now().timestamp())}",
         source=PaymentSource.STRIPE,
-        payer_name=invoice.customer_name,
-        payer_email=invoice.email,
-        amount=invoice.amount,
+        payer_name=payer_name,
+        payer_email=payer_email,
+        amount=float(amount),
         received_at=datetime.now(),
     )
 
@@ -100,7 +131,7 @@ def simulate_pay_invoice(invoice_id: str) -> PaySimulationResult:
 
     if result.status == "confirmed" and result.invoice_id:
         target = store.get_invoice(result.invoice_id)
-        if target is not None:
+        if target is not None and target.status != InvoiceStatus.PAID:
             target.status = InvoiceStatus.PAID
             target.paid_at = datetime.now()
             target.matched_payment_id = payment.payment_id
@@ -114,11 +145,14 @@ def simulate_pay_invoice(invoice_id: str) -> PaySimulationResult:
 
     return PaySimulationResult(
         payment_id=payment.payment_id,
-        invoice_id=result.invoice_id or invoice_id,
+        invoice_id=result.invoice_id,
         match_status=result.status,
         confidence=result.confidence,
         reasoning=result.reasoning,
         method=result.method,
+        payer_name=payment.payer_name,
+        payer_email=payment.payer_email,
+        amount=payment.amount,
     )
 
 
