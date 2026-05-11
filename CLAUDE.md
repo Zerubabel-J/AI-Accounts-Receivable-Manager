@@ -110,6 +110,6 @@ The more valuable, the better. Two specific value moves we are building:
 
 ## Files and references
 
-- `docs/SRS.md` - the approved spec sent to Kidus
+- `docs/SRS.md` - the approved spec sent to the reviewer 
 - `docs/BUILD_SPEC.md` - engineer-facing detail (endpoints, screens, Smart Match cases)
 - `scripts/seed.py` - generates realistic demo data

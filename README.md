@@ -2,7 +2,7 @@
 
 An autonomous AI agent that does the work of a human Accounts Receivable manager for a B2B small or mid-sized company: creates invoices from a sentence, watches incoming payments, matches them to the right invoice using AI judgment, chases late payers on a schedule, and gives the user a daily brief.
 
-Built for the Brain3 Level-1 assignment. Approved scope, then expanded with two value moves Kidus called for - natural-language invoice creation and live "pay this invoice" matching.
+Built for the Brain3 Level-1 assignment. Approved scope, then expanded with two value - natural-language invoice creation and live "pay this invoice" matching.
 
 ---
 

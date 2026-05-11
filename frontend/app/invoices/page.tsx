@@ -1,3 +1,4 @@
+import { MatchDemoSuite } from "@/components/MatchDemoSuite";
 import { PayInvoiceButton } from "@/components/PayInvoiceButton";
 import { InvoiceStatusBadge } from "@/components/StatusBadge";
 import { api } from "@/lib/api";
@@ -32,6 +33,8 @@ export default async function InvoicesPage() {
           {invoices.length} invoices — sortable by status, amount, or due date.
         </p>
       </header>
+
+      <MatchDemoSuite invoices={invoices} />
 
       <div className="overflow-hidden rounded-lg border bg-white">
         <table className="w-full text-sm">
