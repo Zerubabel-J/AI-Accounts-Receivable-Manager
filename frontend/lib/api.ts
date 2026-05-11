@@ -18,3 +18,20 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   }
   return res.json() as Promise<T>;
 }
+
+/** Variant that does not throw on non-2xx - returns { ok, status, data }. */
+export async function apiRaw<T>(
+  path: string,
+  init?: RequestInit,
+): Promise<{ ok: boolean; status: number; data: T }> {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers ?? {}),
+    },
+    cache: "no-store",
+  });
+  const data = (await res.json().catch(() => ({}))) as T;
+  return { ok: res.ok, status: res.status, data };
+}

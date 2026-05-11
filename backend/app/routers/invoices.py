@@ -2,6 +2,7 @@ import logging
 from datetime import date, timedelta
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.integrations.gemini import get_extractor
@@ -61,6 +62,7 @@ def update_invoice(invoice_id: str, patch: InvoiceUpdate) -> Invoice:
 
 class NLInvoiceRequest(BaseModel):
     text: str
+    email: str | None = None  # provided on retry after a 'needs_email' response
 
 
 class NLInvoiceResponse(BaseModel):
@@ -69,11 +71,26 @@ class NLInvoiceResponse(BaseModel):
     reasoning: str
 
 
-@router.post("/from-nl", response_model=NLInvoiceResponse)
-def create_invoice_from_natural_language(req: NLInvoiceRequest) -> NLInvoiceResponse:
+class NLInvoiceNeedsMore(BaseModel):
+    needs: str  # which field is missing, e.g. "email"
+    extracted: dict
+    message: str
+
+
+@router.post(
+    "/from-nl",
+    responses={
+        200: {"model": NLInvoiceResponse},
+        422: {"model": NLInvoiceNeedsMore},
+    },
+)
+def create_invoice_from_natural_language(req: NLInvoiceRequest):
     """Parse a free-form sentence into a new invoice using Gemini.
 
-    Example input:  "Create an invoice for $2,000 for Acme Corp for the May SEO project, due in 30 days"
+    Returns:
+        200 + NLInvoiceResponse on success
+        422 + NLInvoiceNeedsMore when the request is missing the client email
+              (user retries with the email filled in)
     """
     extractor = get_extractor()
     if extractor is None:
@@ -91,6 +108,25 @@ def create_invoice_from_natural_language(req: NLInvoiceRequest) -> NLInvoiceResp
     if not business_name or not isinstance(amount, (int, float)) or amount <= 0:
         raise HTTPException(400, "Could not extract a valid business name and amount from the input.")
 
+    # Email resolution: explicit override > Gemini-extracted > ask user
+    explicit_email = (req.email or "").strip().lower()
+    extracted_email = (parsed.get("email") or "").strip().lower()
+    email = explicit_email or extracted_email
+    if not email:
+        # Tell the UI to ask for it. We return the partial extraction so the user
+        # can see what Gemini already understood while they type the email.
+        return JSONResponse(
+            status_code=422,
+            content={
+                "needs": "email",
+                "extracted": parsed,
+                "message": (
+                    f"What's the client email for {business_name}? "
+                    "I'll need it to bill them and to match payments later."
+                ),
+            },
+        )
+
     # Parse due date safely; fall back to today + 30 days
     due_str = parsed.get("due_date") or ""
     try:
@@ -101,11 +137,6 @@ def create_invoice_from_natural_language(req: NLInvoiceRequest) -> NLInvoiceResp
         due = today + timedelta(days=30)
 
     customer_name = (parsed.get("customer_name") or business_name).strip()
-    email = (parsed.get("email") or "").strip().lower()
-    if not email:
-        # Synthesize a reasonable placeholder so the row is valid; user can edit later
-        slug = "".join(c.lower() for c in business_name if c.isalnum()) or "client"
-        email = f"billing@{slug}.example.com"
 
     store = get_store()
     next_id = f"INV-{len(store.list_invoices()) + 1:04d}"
