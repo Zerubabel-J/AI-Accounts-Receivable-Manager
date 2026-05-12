@@ -54,22 +54,47 @@ All APIs free, no credit card required.
 ## Architecture
 
 ```mermaid
-flowchart TB
-    UI["Next.js Frontend<br/>(Vercel)"]
-    API["FastAPI Backend<br/>(Render)"]
-    AI["Gemini 2.5 Flash"]
-    DB[("Google Sheets")]
-    STRIPE["Stripe<br/>(webhooks)"]
-    MAIL["Gmail API"]
-    CRON["Cloud Scheduler<br/>(daily cron)"]
+```mermaid
+flowchart TD
+    A[User types: 'Bill Acme $2,000 for May SEO'] --> B{Email in prompt?}
+    B -->|Yes| D[Gemini extracts:<br/>business, amount,<br/>due date, description]
+    B -->|No| C[Agent asks user<br/>for client email]
+    C --> D
+    D --> E[(Google Sheet:<br/>new invoice row,<br/>status = sent)]
 
-    UI <--> API
-    API --> AI
-    API <--> DB
-    STRIPE -- payment event --> API
-    API --> MAIL
-    CRON -- reminders + summary --> API
+    E -.daily cron 9am.-> F{Past due date?}
+    F -->|Yes| G[Draft reminder email<br/>tone: friendly/firm/escalation]
+    G --> E
+
+    H[Payment arrives<br/>Stripe webhook or<br/>POST /invoices/&#123;id&#125;/pay] --> I[Smart Match engine]
+
+    I --> J{Exact email match?}
+    J -->|Yes| CONF[CONFIRMED]
+    J -->|No| K{Exact business name<br/>after normalizing<br/>LLC/Inc?}
+    K -->|Yes| CONF
+    K -->|No| L[Call Gemini with<br/>payment + top 5<br/>candidate invoices]
+    L --> M{Gemini confidence?}
+    M -->|>= 0.85| CONF
+    M -->|0.60-0.85| REV[NEEDS REVIEW]
+    M -->|< 0.60| NM[NO MATCH]
+
+    CONF --> N[(Sheet: invoice<br/>status = paid)]
+    REV --> O[Show in Review Queue<br/>with AI's reasoning]
+    O -->|user approves| N
+    NM --> P[Log payment,<br/>leave invoice open]
+
+    N -.daily cron 8am.-> Q[Daily summary email<br/>to the user]
+    P -.-> Q
+
+    style D fill:#ede9fe,stroke:#7c3aed
+    style L fill:#ede9fe,stroke:#7c3aed
+    style CONF fill:#dcfce7,stroke:#15803d
+    style REV fill:#fef3c7,stroke:#a16207
+    style NM fill:#fee2e2,stroke:#b91c1c
+    style E fill:#fce7f3,stroke:#be185d
+    style N fill:#fce7f3,stroke:#be185d
 ```
+
 
 ### Smart Match flow
 
