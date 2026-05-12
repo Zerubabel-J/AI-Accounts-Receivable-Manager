@@ -54,37 +54,35 @@ All APIs free, no credit card required.
 ## Architecture
 
 ```mermaid
-```mermaid
 flowchart TD
-    A[User types: 'Bill Acme $2,000 for May SEO'] --> B{Email in prompt?}
-    B -->|Yes| D[Gemini extracts:<br/>business, amount,<br/>due date, description]
-    B -->|No| C[Agent asks user<br/>for client email]
+    A["User types: Bill Acme $2,000 for May SEO"] --> B{Email in prompt?}
+    B -- Yes --> D["Gemini extracts<br/>business, amount,<br/>due date, description"]
+    B -- No --> C[Agent asks user<br/>for client email]
     C --> D
-    D --> E[(Google Sheet:<br/>new invoice row,<br/>status = sent)]
+    D --> E[("Google Sheet:<br/>new invoice row,<br/>status = sent")]
 
-    E -.daily cron 9am.-> F{Past due date?}
-    F -->|Yes| G[Draft reminder email<br/>tone: friendly/firm/escalation]
+    E -. daily cron 9am .-> F{Past due date?}
+    F -- Yes --> G[Draft reminder email<br/>tone: friendly / firm / escalation]
     G --> E
 
-    H[Payment arrives<br/>Stripe webhook or<br/>POST /invoices/&#123;id&#125;/pay] --> I[Smart Match engine]
+    H["Payment arrives<br/>Stripe webhook or<br/>POST /invoices/ID/pay"] --> I[Smart Match engine]
 
     I --> J{Exact email match?}
-    J -->|Yes| CONF[CONFIRMED]
-    J -->|No| K{Exact business name<br/>after normalizing<br/>LLC/Inc?}
-    K -->|Yes| CONF
-    K -->|No| L[Call Gemini with<br/>payment + top 5<br/>candidate invoices]
+    J -- Yes --> CONF[CONFIRMED]
+    J -- No --> K{Exact business name<br/>after normalizing<br/>LLC / Inc?}
+    K -- Yes --> CONF
+    K -- No --> L[Call Gemini with<br/>payment + top 5<br/>candidate invoices]
     L --> M{Gemini confidence?}
-    M -->|>= 0.85| CONF
-    M -->|0.60-0.85| REV[NEEDS REVIEW]
-    M -->|< 0.60| NM[NO MATCH]
+    M -- ">= 0.85" --> CONF
+    M -- "0.60 - 0.85" --> REV[NEEDS REVIEW]
+    M -- "< 0.60" --> NM[NO MATCH]
 
-    CONF --> N[(Sheet: invoice<br/>status = paid)]
+    CONF --> N[("Sheet: invoice<br/>status = paid")]
     REV --> O[Show in Review Queue<br/>with AI's reasoning]
-    O -->|user approves| N
+    O -- user approves --> N
     NM --> P[Log payment,<br/>leave invoice open]
 
-    N -.daily cron 8am.-> Q[Daily summary email<br/>to the user]
-    P -.-> Q
+    E -. daily cron 8am .-> Q[Daily summary email<br/>to the user]
 
     style D fill:#ede9fe,stroke:#7c3aed
     style L fill:#ede9fe,stroke:#7c3aed
