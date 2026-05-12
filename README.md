@@ -234,52 +234,6 @@ curl -X POST http://localhost:8000/jobs/run-daily-summary \
 CLAUDE.md       project context for AI-assisted dev
 ```
 
----
-
-## Demo script (5 minutes)
-
-**0:00-0:30 - Hook**
-> "Every B2B company has an Accounts Receivable function - someone chases late payments, matches them to invoices, reports to the CFO. For SMBs, that's a part-time job for a Controller or it falls on the founder. I built an AI agent that does it."
-
-**0:30-1:30 - Dashboard tour**
-> "Cash collected $X. Outstanding $Y. Cash at Risk $Z - flagged invoices 30+ days late. DSO 44 days - a CFO knows what that means. And **Recovered Revenue $88K this month** - money the agent matched and chased that probably wouldn't have come in on time."
-
-Point at "Needs Your Review":
-> "When the AI isn't sure, it asks me. The reasoning is right there so I can audit the call."
-
-**1:30-3:00 - The end-to-end loop (the wow moment)**
-
-Open the Google Sheet in a side tab. Then on the dashboard:
-> "Watch this. I'll create the next invoice by talking."
-
-Type: `Bill DemoCo $1200 for May ad spend audit`. Click Create.
-
-> "The agent didn't make up an email - it asked. That's what makes it an agent, not a form."
-
-Type the email, hit Continue. Switch to the Sheet tab, refresh:
-> "New row in the database. Now I'll simulate the client paying."
-
-Back to dashboard, click **Pay INV-XXXX**.
-> "Smart Match runs - exact email, 100% confidence, confirmed."
-
-Switch to the Sheet:
-> "Status flipped to paid. End to end in 20 seconds, no human edit to the database."
-
-**3:00-4:00 - The AI judgment moment**
-
-Click **Tricky (AI judges)**:
-> "Sometimes the email doesn't match and the business name is garbled. Gemini compares Polaris to Polaris Studio, amounts identical - 92% confidence, confirmed. That's the AI doing real work, not just pattern matching."
-
-Then click an item in the Review Queue:
-> "When confidence is lower, the agent never auto-pays. It asks me, shows its reasoning, and I approve with one click. That's what makes a CFO trust it."
-
-**4:00-4:30 - The proactive part**
-> "This all runs on a schedule too. Every morning the agent sweeps overdue invoices and drafts reminders. At 8am it emails me a one-page summary. I don't have to log in."
-
-**4:30-5:00 - Architecture and close**
-> "Next.js plus FastAPI plus Gemini plus Google Sheets - all free tier. The Sheet is the database, which means full audit trail. A human can open it and see exactly what the agent did. Replaces $5K to $15K a month of manual AR work plus $500/mo of legacy software. Same engine scales up. Thanks for watching."
-
----
 
 ## What's intentionally not built (1-day scope)
 
